@@ -32,3 +32,60 @@ model Session {
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
+
+model Bundle {
+  id          String   @id @default(cuid())
+  shop        String
+  title       String
+  description String?
+  status      String   @default("active") // active | draft
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products  BundleProduct[]
+  discounts BundleDiscount[]
+  usages    BundleUsage[]
+}
+
+model BundleProduct {
+  id         String @id @default(cuid())
+  bundleId   String
+  productId  String
+  variantId  String?
+  title      String
+  imageUrl   String?
+  price      String @default("0.00")
+  quantity   Int    @default(1)
+  position   Int    @default(0)
+
+  bundle Bundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+}
+
+model BundleDiscount {
+  id             String   @id @default(cuid())
+  bundleId       String
+  discountType   String   // percentage | fixed_amount
+  discountValue  Float
+  minProducts    Int      @default(2)  // minimum products in bundle to trigger discount
+  isActive       Boolean  @default(true)
+  oneTimeUse     Boolean  @default(true)  // discount valid for one-time use per customer
+  discountCode   String?  // optional custom code; auto-generated if null
+  shopifyDiscountId String? // Shopify discount ID after creation
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  bundle  Bundle        @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  usages  BundleUsage[]
+}
+
+model BundleUsage {
+  id               String   @id @default(cuid())
+  bundleId         String
+  bundleDiscountId String?
+  customerEmail    String?
+  orderId          String?
+  usedAt           DateTime @default(now())
+
+  bundle         Bundle          @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  bundleDiscount BundleDiscount? @relation(fields: [bundleDiscountId], references: [id])
+}

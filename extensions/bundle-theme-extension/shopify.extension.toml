@@ -1,0 +1,7 @@
+api_version = "2025-01"
+
+[[extensions]]
+type = "theme"
+name = "Bundle Discount Widget"
+handle = "bundle-discount-widget"
+uid = "8ed8675d-f18b-fc70-5c87-377e83dd57fa6c7cba28"

@@ -7,7 +7,7 @@ name = "bundle first app"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products,write_metaobjects,write_metaobject_definitions"
+scopes = "write_products,write_metaobjects,write_metaobject_definitions,write_discounts,read_discounts"
 
 [product.metafields.app.demo_info]
 type = "single_line_text_field"
@@ -16,6 +16,15 @@ description = "Tracks products created by the Shopify app template for developme
 
   [product.metafields.app.demo_info.access]
   admin = "merchant_read_write"
+
+[shop.metafields.bundle_app.app_url]
+type = "single_line_text_field"
+name = "Bundle App URL"
+description = "The app URL for the bundle discount app (used by theme extension)"
+
+  [shop.metafields.bundle_app.app_url.access]
+  admin = "merchant_read_write"
+  storefront = "public_read"
 
 [metaobjects.app.example]
 name = "Example"
@@ -48,5 +57,4 @@ api_version = "2027-01"
 redirect_urls = [ "https://example.com/api/auth" ]
 
 [build]
-include_config_on_deploy = true
 automatically_update_urls_on_dev = true
