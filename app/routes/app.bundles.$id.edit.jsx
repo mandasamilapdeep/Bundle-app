@@ -5,6 +5,7 @@ import {
   useActionData,
   useNavigation,
   useSubmit,
+  Link,
 } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -81,6 +82,11 @@ export const action = async ({ request, params }) => {
     where: { bundleId: params.id, id: { notIn: existingIds } },
   });
 
+  const bundleProductGids = products
+    .map((p) => p.productId)
+    .filter(Boolean)
+    .map((id) => (id.startsWith("gid://") ? id : `gid://shopify/Product/${id}`));
+
   for (const discount of discounts) {
     const code =
       (discount.discountCode || "").trim() ||
@@ -101,6 +107,35 @@ export const action = async ({ request, params }) => {
     } else {
       let shopifyDiscountId = null;
       try {
+        const discountInput = {
+          title: `${title} - Bundle Discount`,
+          code,
+          startsAt: new Date().toISOString(),
+          customerGets: {
+            value:
+              discount.discountType === "percentage"
+                ? { percentage: parseFloat(discount.discountValue) / 100 }
+                : {
+                    discountAmount: {
+                      amount: String(parseFloat(discount.discountValue)),
+                      appliesOnEachItem: false,
+                    },
+                  },
+            items:
+              bundleProductGids.length > 0
+                ? { products: { productsToAdd: bundleProductGids } }
+                : { all: true },
+          },
+          minimumRequirement: {
+            quantity: {
+              greaterThanOrEqualToQuantity: String(parseInt(discount.minProducts) || 2),
+            },
+          },
+          customerSelection: { all: true },
+          appliesOncePerCustomer:
+            discount.oneTimeUse === true || discount.oneTimeUse === "true",
+        };
+
         const res = await admin.graphql(
           `#graphql
           mutation discountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
@@ -111,26 +146,7 @@ export const action = async ({ request, params }) => {
           }`,
           {
             variables: {
-              basicCodeDiscount: {
-                title: `${title} - Bundle Discount`,
-                code,
-                startsAt: new Date().toISOString(),
-                customerGets: {
-                  value:
-                    discount.discountType === "percentage"
-                      ? { percentage: parseFloat(discount.discountValue) / 100 }
-                      : {
-                          discountAmount: {
-                            amount: String(parseFloat(discount.discountValue)),
-                            appliesOnEachItem: false,
-                          },
-                        },
-                  items: { all: true },
-                },
-                customerSelection: { all: true },
-                appliesOncePerCustomer:
-                  discount.oneTimeUse === true || discount.oneTimeUse === "true",
-              },
+              basicCodeDiscount: discountInput,
             },
           },
         );
@@ -194,7 +210,16 @@ export default function EditBundle() {
           oneTimeUse: d.oneTimeUse,
           discountCode: d.discountCode || "",
         }))
-      : [{ discountType: "percentage", discountValue: "10", minProducts: "2", isActive: true, oneTimeUse: true, discountCode: "" }],
+      : [
+          {
+            discountType: "percentage",
+            discountValue: "10",
+            minProducts: "2",
+            isActive: true,
+            oneTimeUse: true,
+            discountCode: "",
+          },
+        ],
   );
   const [errors, setErrors] = useState({});
   const [savedBanner, setSavedBanner] = useState(false);
@@ -211,7 +236,8 @@ export default function EditBundle() {
   const validate = () => {
     const errs = {};
     if (!title.trim()) errs.title = "Bundle title is required";
-    if (products.length < 2) errs.products = "Please add at least 2 products to this bundle";
+    if (products.length < 2)
+      errs.products = "Select 2–100 products. Customers must buy all of them to get the discount.";
     discounts.forEach((d, i) => {
       if (!d.discountType) errs[`discount_${i}_type`] = "Discount type is required";
       const v = parseFloat(d.discountValue);
@@ -224,7 +250,7 @@ export default function EditBundle() {
   };
 
   const handleSubmit = (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (!validate()) return;
 
     const fd = new FormData();
@@ -257,333 +283,1194 @@ export default function EditBundle() {
           };
         });
         setProducts(picked);
-        setErrors((prev) => { const n = { ...prev }; delete n.products; return n; });
+        setErrors((prev) => {
+          const n = { ...prev };
+          delete n.products;
+          return n;
+        });
       }
     } catch (err) {
       console.error("Resource picker error:", err);
     }
   }, [shopify, products]);
 
-  const updateProductQty = (index, qty) => {
-    const updated = [...products];
-    updated[index] = { ...updated[index], quantity: Math.max(1, parseInt(qty) || 1) };
-    setProducts(updated);
-  };
-  const removeProduct = (index) => setProducts((prev) => prev.filter((_, i) => i !== index));
+  const removeProduct = (index) =>
+    setProducts((prev) => prev.filter((_, i) => i !== index));
 
   const addDiscount = () =>
-    setDiscounts((prev) => [...prev, { discountType: "percentage", discountValue: "10", minProducts: "2", isActive: true, oneTimeUse: true, discountCode: "" }]);
+    setDiscounts((prev) => [
+      ...prev,
+      {
+        discountType: "percentage",
+        discountValue: "10",
+        minProducts: "2",
+        isActive: true,
+        oneTimeUse: true,
+        discountCode: "",
+      },
+    ]);
+
   const updateDiscount = (index, field, value) =>
-    setDiscounts((prev) => { const n = [...prev]; n[index] = { ...n[index], [field]: value }; return n; });
-  const removeDiscount = (index) => setDiscounts((prev) => prev.filter((_, i) => i !== index));
+    setDiscounts((prev) => {
+      const n = [...prev];
+      n[index] = { ...n[index], [field]: value };
+      return n;
+    });
 
-  const hasErrors = Object.keys(errors).length > 0;
+  const removeDiscount = (index) =>
+    setDiscounts((prev) => prev.filter((_, i) => i !== index));
 
-  const fieldStyle = (err) => ({
-    width: "100%", padding: "8px 12px", fontSize: 14,
-    border: `1px solid ${err ? "#c0392b" : "#ccc"}`,
-    borderRadius: 6, boxSizing: "border-box", background: "#fff", outline: "none",
-  });
-  const labelStyle = (err) => ({
-    display: "block", fontWeight: 600, marginBottom: 4, fontSize: 13,
-    color: err ? "#c0392b" : "#1a1a1a",
-  });
-  const errMsg = (msg) =>
-    msg ? <p style={{ color: "#c0392b", fontSize: 12, margin: "4px 0 0" }}>⚠ {msg}</p> : null;
+  const swatchColors = ["#fca5a5", "#86efac", "#93c5fd", "#fde047", "#c4b5fd", "#fdba74"];
 
   return (
-    <s-page heading={`Edit: ${bundle.title}`} backAction={{ url: "/app/bundles" }}>
+    <div
+      style={{
+        maxWidth: 820,
+        margin: "0 auto",
+        padding: "24px 20px 60px",
+        fontFamily:
+          "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+        color: "#1f2937",
+      }}
+    >
+      {/* ─── Top Breadcrumbs ──────────────────────────────────────────────────── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 20,
+        }}
+      >
+        <Link
+          to="/app/bundles"
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: "50%",
+            border: "1px solid #e5e7eb",
+            backgroundColor: "#ffffff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            textDecoration: "none",
+            color: "#374151",
+            fontSize: 14,
+            fontWeight: 700,
+            boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+          }}
+        >
+          ‹
+        </Link>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 13,
+            color: "#4b5563",
+          }}
+        >
+          <Link
+            to="/app"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              textDecoration: "none",
+              color: "#111827",
+            }}
+          >
+            <span
+              style={{
+                padding: "0 4px",
+                height: 20,
+                borderRadius: 5,
+                backgroundColor: "#059669",
+                color: "#ffffff",
+                fontWeight: 800,
+                fontSize: 10,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              MS
+            </span>
+            <span style={{ fontWeight: 600, color: "#111827" }}>
+              MS Bundle discount
+            </span>
+          </Link>
+          <span style={{ color: "#9ca3af" }}>/</span>
+          <span style={{ color: "#6b7280" }}>Edit: {bundle.title}</span>
+        </div>
+      </div>
+
+      {/* ─── Saved Banner Notification ────────────────────────────────────────── */}
       {savedBanner && (
-        <div style={{ margin: "0 0 16px", padding: "12px 16px", background: "#f0faf0", border: "1px solid #b7dfb7", borderRadius: 8, color: "#2a7a2a", fontWeight: 600, fontSize: 14 }}>
-          ✅ Bundle saved successfully!
+        <div
+          style={{
+            marginBottom: 20,
+            padding: "12px 18px",
+            backgroundColor: "#ecfdf5",
+            border: "1px solid #a7f3d0",
+            borderRadius: 10,
+            color: "#065f46",
+            fontWeight: 600,
+            fontSize: 14,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <span>✅</span>
+          <span>Bundle saved successfully!</span>
         </div>
       )}
 
-      {hasErrors && (
-        <div style={{ margin: "0 0 16px", padding: "12px 16px", background: "#fdf2f2", border: "1px solid #f5c6cb", borderRadius: 8 }}>
-          <p style={{ margin: "0 0 6px", fontWeight: 700, color: "#c0392b", fontSize: 14 }}>Please fix these errors:</p>
-          <ul style={{ margin: 0, paddingLeft: 18, color: "#c0392b", fontSize: 13 }}>
-            {errors.title && <li>{errors.title}</li>}
-            {errors.products && <li>{errors.products}</li>}
-            {discounts.map((_, i) =>
-              errors[`discount_${i}_type`] || errors[`discount_${i}_value`] ? (
-                <li key={i}>Discount {i + 1}: {errors[`discount_${i}_type`] || errors[`discount_${i}_value`]}</li>
-              ) : null,
-            )}
-          </ul>
+      {/* ─── Page Header & Action Buttons ──────────────────────────────────────── */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          marginBottom: 24,
+          gap: 16,
+        }}
+      >
+        <div>
+          <h1
+            style={{
+              fontSize: 26,
+              fontWeight: 800,
+              color: "#111827",
+              margin: "0 0 4px 0",
+              letterSpacing: "-0.02em",
+            }}
+          >
+            Edit bundle
+          </h1>
+          <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
+            Group products and reward customers who buy them together.
+          </p>
         </div>
-      )}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            type="button"
+            onClick={() => navigate("/app/bundles")}
+            disabled={isSubmitting}
+            style={{
+              backgroundColor: "#ffffff",
+              border: "1px solid #e5e7eb",
+              borderRadius: 8,
+              padding: "8px 18px",
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#374151",
+              cursor: isSubmitting ? "not-allowed" : "pointer",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+              transition: "all 0.15s ease",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+            style={{
+              backgroundColor: isSubmitting ? "#6ee7b7" : "#059669",
+              border: "none",
+              borderRadius: 8,
+              padding: "8px 22px",
+              fontSize: 13,
+              fontWeight: 700,
+              color: "#ffffff",
+              cursor: isSubmitting ? "not-allowed" : "pointer",
+              boxShadow: "0 1px 3px rgba(5,150,105,0.25)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              transition: "all 0.15s ease",
+            }}
+          >
+            {isSubmitting ? "Saving…" : "Save bundle"}
+          </button>
+        </div>
+      </div>
 
       <form onSubmit={handleSubmit} noValidate>
-        {/* ── Bundle Details ─── */}
-        <s-section heading="Bundle Details">
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {/* ─── Card 1: Bundle details ────────────────────────────────────────── */}
+        <div
+          style={{
+            backgroundColor: "#ffffff",
+            borderRadius: 16,
+            border: "1px solid #e5e7eb",
+            padding: "24px 28px",
+            marginBottom: 20,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.02)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              gap: 12,
+              alignItems: "flex-start",
+              marginBottom: 20,
+            }}
+          >
+            <div
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: 6,
+                backgroundColor: "#d1fae5",
+                color: "#059669",
+                fontWeight: 800,
+                fontSize: 13,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              1
+            </div>
             <div>
-              <label style={labelStyle(errors.title)}>
-                Bundle Title <span style={{ color: "#c0392b" }}>*</span>
+              <h2
+                style={{
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: "#111827",
+                  margin: 0,
+                }}
+              >
+                Bundle details
+              </h2>
+              <p
+                style={{
+                  fontSize: 12,
+                  color: "#6b7280",
+                  margin: "2px 0 0 0",
+                }}
+              >
+                Name your bundle and choose whether it's live.
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            {/* Title */}
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "#111827",
+                  marginBottom: 6,
+                }}
+              >
+                Bundle title <span style={{ color: "#dc2626" }}>*</span>
               </label>
               <input
                 type="text"
                 value={title}
                 onChange={(e) => {
                   setTitle(e.target.value);
-                  if (e.target.value.trim()) setErrors((p) => { const n = { ...p }; delete n.title; return n; });
+                  if (e.target.value.trim()) {
+                    setErrors((prev) => {
+                      const n = { ...prev };
+                      delete n.title;
+                      return n;
+                    });
+                  }
                 }}
-                style={fieldStyle(errors.title)}
+                placeholder="e.g. Summer Starter Pack"
+                style={{
+                  width: "100%",
+                  padding: "10px 14px",
+                  fontSize: 13,
+                  border: `1px solid ${errors.title ? "#dc2626" : "#e5e7eb"}`,
+                  borderRadius: 8,
+                  backgroundColor: "#f9fafb",
+                  color: "#111827",
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
               />
-              {errMsg(errors.title)}
+              {errors.title && (
+                <p
+                  style={{
+                    margin: "4px 0 0",
+                    fontSize: 12,
+                    color: "#dc2626",
+                  }}
+                >
+                  {errors.title}
+                </p>
+              )}
             </div>
 
+            {/* Description */}
             <div>
-              <label style={labelStyle(false)}>Description</label>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "#111827",
+                  marginBottom: 6,
+                }}
+              >
+                Description
+              </label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                rows={3}
-                style={{ ...fieldStyle(false), resize: "vertical" }}
+                placeholder="Describe what's included in this bundle..."
+                rows={4}
+                style={{
+                  width: "100%",
+                  padding: "10px 14px",
+                  fontSize: 13,
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  backgroundColor: "#f9fafb",
+                  color: "#111827",
+                  outline: "none",
+                  boxSizing: "border-box",
+                  resize: "vertical",
+                }}
               />
             </div>
 
+            {/* Status (Segmented Pill) */}
             <div>
-              <label style={labelStyle(false)}>Status</label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
-                style={{ padding: "8px 12px", fontSize: 14, border: "1px solid #ccc", borderRadius: 6, background: "#fff", minWidth: 160 }}
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "#111827",
+                  marginBottom: 6,
+                }}
               >
-                <option value="active">Active</option>
-                <option value="draft">Draft</option>
-              </select>
+                Status
+              </label>
+              <div
+                style={{
+                  display: "inline-flex",
+                  backgroundColor: "#f3f4f6",
+                  padding: 3,
+                  borderRadius: 8,
+                  border: "1px solid #e5e7eb",
+                  gap: 2,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setStatus("active")}
+                  style={{
+                    backgroundColor:
+                      status === "active" ? "#ffffff" : "transparent",
+                    color: status === "active" ? "#059669" : "#6b7280",
+                    fontWeight: status === "active" ? 700 : 500,
+                    borderRadius: 6,
+                    padding: "6px 20px",
+                    fontSize: 12,
+                    border:
+                      status === "active"
+                        ? "1px solid #e5e7eb"
+                        : "none",
+                    boxShadow:
+                      status === "active"
+                        ? "0 1px 2px rgba(0,0,0,0.06)"
+                        : "none",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  Active
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatus("draft")}
+                  style={{
+                    backgroundColor:
+                      status !== "active" ? "#ffffff" : "transparent",
+                    color: status !== "active" ? "#111827" : "#6b7280",
+                    fontWeight: status !== "active" ? 700 : 500,
+                    borderRadius: 6,
+                    padding: "6px 20px",
+                    fontSize: 12,
+                    border:
+                      status !== "active"
+                        ? "1px solid #e5e7eb"
+                        : "none",
+                    boxShadow:
+                      status !== "active"
+                        ? "0 1px 2px rgba(0,0,0,0.06)"
+                        : "none",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  Inactive
+                </button>
+              </div>
             </div>
           </div>
-        </s-section>
+        </div>
 
-        {/* ── Bundle Products ─── */}
-        <s-section heading="Bundle Products">
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {bundle.usages.length > 0 && (
-              <div style={{ padding: "10px 14px", background: "#f0f7ff", border: "1px solid #b3d4f5", borderRadius: 6, fontSize: 14, color: "#1a6ea8" }}>
-                📊 This bundle has been used <strong>{bundle.usages.length}</strong> time{bundle.usages.length !== 1 ? "s" : ""}
-              </div>
-            )}
-
-            {errors.products && (
-              <div style={{ padding: "10px 14px", background: "#fdf2f2", border: "1px solid #f5c6cb", borderRadius: 6, color: "#c0392b", fontSize: 14 }}>
-                ⚠ {errors.products}
-              </div>
-            )}
-
-            <p style={{ margin: 0, fontSize: 14, color: "#555" }}>
-              Select <strong>2–100 products</strong> to include in this bundle.
-            </p>
-
-            <div>
-              <s-button type="button" onClick={handleProductPicker}>
-                Edit Products ({products.length} selected)
-              </s-button>
+        {/* ─── Card 2: Bundle products ───────────────────────────────────────── */}
+        <div
+          style={{
+            backgroundColor: "#ffffff",
+            borderRadius: 16,
+            border: "1px solid #e5e7eb",
+            padding: "24px 28px",
+            marginBottom: 20,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.02)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              gap: 12,
+              alignItems: "flex-start",
+              marginBottom: 18,
+            }}
+          >
+            <div
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: 6,
+                backgroundColor: "#d1fae5",
+                color: "#059669",
+                fontWeight: 800,
+                fontSize: 13,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              2
             </div>
+            <div>
+              <h2
+                style={{
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: "#111827",
+                  margin: 0,
+                }}
+              >
+                Bundle products
+              </h2>
+              <p
+                style={{
+                  fontSize: 12,
+                  color: "#6b7280",
+                  margin: "2px 0 0 0",
+                }}
+              >
+                Select 2–100 products. Customers must buy all of them to get the discount.
+              </p>
+            </div>
+          </div>
+
+          {/* Usage Badge (if bundle was used) */}
+          {bundle.usages.length > 0 && (
+            <div
+              style={{
+                marginBottom: 16,
+                padding: "8px 14px",
+                backgroundColor: "#eff6ff",
+                border: "1px solid #dbeafe",
+                borderRadius: 8,
+                fontSize: 13,
+                color: "#1e40af",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <span>📊</span>
+              <span>
+                This bundle has been used{" "}
+                <strong>{bundle.usages.length}</strong> time
+                {bundle.usages.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+          )}
+
+          {/* Selected Product Chips */}
+          {products.length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 10,
+                marginBottom: 16,
+              }}
+            >
+              {products.map((p, index) => {
+                const swatchColor = swatchColors[index % swatchColors.length];
+
+                return (
+                  <div
+                    key={p.productId || index}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "6px 12px",
+                      backgroundColor: "#f9fafb",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 8,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "#111827",
+                    }}
+                  >
+                    {p.imageUrl ? (
+                      <img
+                        src={p.imageUrl}
+                        alt=""
+                        style={{
+                          width: 18,
+                          height: 18,
+                          borderRadius: 4,
+                          objectFit: "cover",
+                          flexShrink: 0,
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: 16,
+                          height: 16,
+                          borderRadius: 4,
+                          backgroundColor: swatchColor,
+                          flexShrink: 0,
+                        }}
+                      />
+                    )}
+                    <span>{p.title}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeProduct(index)}
+                      title="Remove product"
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#9ca3af",
+                        cursor: "pointer",
+                        fontSize: 16,
+                        lineHeight: 1,
+                        padding: "0 0 0 2px",
+                        display: "flex",
+                        alignItems: "center",
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Add Products Button & Counter */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <button
+              type="button"
+              onClick={handleProductPicker}
+              style={{
+                backgroundColor: "#ffffff",
+                border: "1px solid #e5e7eb",
+                borderRadius: 8,
+                padding: "7px 16px",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#111827",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <span style={{ fontSize: 15, fontWeight: 700, color: "#111827" }}>+</span>
+              <span>Edit products</span>
+            </button>
 
             {products.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {products.map((product, index) => (
-                  <div
-                    key={product.productId}
-                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", border: "1px solid #e0e0e0", borderRadius: 8, background: "#fafafa" }}
-                  >
-                    {product.imageUrl
-                      ? <img src={product.imageUrl} alt={product.title} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} />
-                      : <div style={{ width: 48, height: 48, background: "#e0e0e0", borderRadius: 6, flexShrink: 0 }} />
-                    }
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ margin: 0, fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{product.title}</p>
-                      <p style={{ margin: 0, fontSize: 13, color: "#777" }}>${parseFloat(product.price || 0).toFixed(2)}</p>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <label style={{ fontSize: 13, fontWeight: 500, color: "#555" }}>Qty</label>
-                      <input
-                        type="number"
-                        value={product.quantity}
-                        min={1}
-                        max={100}
-                        onChange={(e) => updateProductQty(index, e.target.value)}
-                        style={{ width: 58, padding: "5px 8px", fontSize: 14, border: "1px solid #ccc", borderRadius: 5, textAlign: "center" }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeProduct(index)}
-                        style={{ padding: "5px 12px", fontSize: 13, background: "#fff", color: "#c0392b", border: "1px solid #c0392b", borderRadius: 5, cursor: "pointer", fontWeight: 500 }}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <span
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#6b7280",
+                }}
+              >
+                {products.length} selected
+              </span>
             )}
           </div>
-        </s-section>
 
-        {/* ── Discounts ─── */}
-        <s-section heading="Bundle Discounts">
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <p style={{ margin: 0, fontSize: 14, color: "#555" }}>
-              Configure one-time-use discounts. Each creates a Shopify discount code.
+          {errors.products && (
+            <p
+              style={{
+                margin: "10px 0 0",
+                fontSize: 12,
+                color: "#dc2626",
+              }}
+            >
+              {errors.products}
             </p>
+          )}
+        </div>
 
+        {/* ─── Card 3: Bundle discounts ──────────────────────────────────────── */}
+        <div
+          style={{
+            backgroundColor: "#ffffff",
+            borderRadius: 16,
+            border: "1px solid #e5e7eb",
+            padding: "24px 28px",
+            marginBottom: 20,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.02)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              gap: 12,
+              alignItems: "flex-start",
+              marginBottom: 18,
+            }}
+          >
+            <div
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: 6,
+                backgroundColor: "#d1fae5",
+                color: "#059669",
+                fontWeight: 800,
+                fontSize: 13,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              3
+            </div>
+            <div>
+              <h2
+                style={{
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: "#111827",
+                  margin: 0,
+                }}
+              >
+                Bundle discounts
+              </h2>
+              <p
+                style={{
+                  fontSize: 12,
+                  color: "#6b7280",
+                  margin: "2px 0 0 0",
+                }}
+              >
+                Each discount creates a Shopify discount code.
+              </p>
+            </div>
+          </div>
+
+          {/* Discount Tiers */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+              marginBottom: 16,
+            }}
+          >
             {discounts.map((discount, index) => (
               <div
                 key={index}
-                style={{ padding: 16, border: "1px solid #e0e0e0", borderRadius: 8, background: "#fafafa", display: "flex", flexDirection: "column", gap: 14 }}
+                style={{
+                  backgroundColor: "#f9fafb",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 12,
+                  padding: "20px 22px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 16,
+                }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <strong style={{ fontSize: 14 }}>Discount {index + 1}</strong>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: "#111827",
+                      }}
+                    >
+                      Discount {index + 1}
+                    </div>
                     {discount.discountCode && (
-                      <span style={{ background: "#e8f4fd", color: "#1a6ea8", fontSize: 12, padding: "2px 8px", borderRadius: 100, fontFamily: "monospace", fontWeight: 600 }}>
+                      <span
+                        style={{
+                          backgroundColor: "#eff6ff",
+                          color: "#1d4ed8",
+                          border: "1px solid #bfdbfe",
+                          padding: "2px 8px",
+                          borderRadius: 100,
+                          fontSize: 11,
+                          fontFamily: "monospace",
+                          fontWeight: 700,
+                        }}
+                      >
                         {discount.discountCode}
                       </span>
                     )}
                   </div>
+
                   {discounts.length > 1 && (
                     <button
                       type="button"
                       onClick={() => removeDiscount(index)}
-                      style={{ padding: "4px 10px", fontSize: 13, background: "#fff", color: "#c0392b", border: "1px solid #c0392b", borderRadius: 5, cursor: "pointer" }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#dc2626",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        padding: "2px 6px",
+                      }}
                     >
-                      Remove
+                      Remove tier
                     </button>
                   )}
                 </div>
 
-                <div>
-                  <label style={labelStyle(errors[`discount_${index}_type`])}>
-                    Discount Type <span style={{ color: "#c0392b" }}>*</span>
-                  </label>
-                  <select
-                    value={discount.discountType}
-                    onChange={(e) => updateDiscount(index, "discountType", e.target.value)}
-                    style={{ padding: "8px 12px", fontSize: 14, border: `1px solid ${errors[`discount_${index}_type`] ? "#c0392b" : "#ccc"}`, borderRadius: 6, background: "#fff", minWidth: 200 }}
-                  >
-                    <option value="percentage">Percentage Off (%)</option>
-                    <option value="fixed_amount">Fixed Amount Off ($)</option>
-                  </select>
-                  {errMsg(errors[`discount_${index}_type`])}
+                {/* Row 1: Type + Value */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 16,
+                  }}
+                >
+                  {/* Type */}
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "#111827",
+                        marginBottom: 6,
+                      }}
+                    >
+                      Discount type <span style={{ color: "#dc2626" }}>*</span>
+                    </label>
+                    <select
+                      value={discount.discountType}
+                      onChange={(e) =>
+                        updateDiscount(index, "discountType", e.target.value)
+                      }
+                      style={{
+                        width: "100%",
+                        padding: "10px 14px",
+                        fontSize: 13,
+                        border: "1px solid #e5e7eb",
+                        borderRadius: 8,
+                        backgroundColor: "#ffffff",
+                        color: "#111827",
+                        outline: "none",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      <option value="percentage">Percentage off (%)</option>
+                      <option value="fixed_amount">Fixed amount off ($)</option>
+                    </select>
+                  </div>
+
+                  {/* Value */}
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "#111827",
+                        marginBottom: 6,
+                      }}
+                    >
+                      {discount.discountType === "percentage"
+                        ? "Discount (%)"
+                        : "Discount ($)"}{" "}
+                      <span style={{ color: "#dc2626" }}>*</span>
+                    </label>
+                    <div style={{ position: "relative", width: "100%" }}>
+                      <input
+                        type="number"
+                        value={discount.discountValue}
+                        min={0}
+                        max={
+                          discount.discountType === "percentage"
+                            ? 100
+                            : undefined
+                        }
+                        step="0.01"
+                        onChange={(e) =>
+                          updateDiscount(index, "discountValue", e.target.value)
+                        }
+                        style={{
+                          width: "100%",
+                          padding: "10px 32px 10px 14px",
+                          fontSize: 13,
+                          border: `1px solid ${
+                            errors[`discount_${index}_value`]
+                              ? "#dc2626"
+                              : "#e5e7eb"
+                          }`,
+                          borderRadius: 8,
+                          backgroundColor: "#ffffff",
+                          color: "#111827",
+                          outline: "none",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                      <span
+                        style={{
+                          position: "absolute",
+                          right: 14,
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          color: "#6b7280",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          pointerEvents: "none",
+                        }}
+                      >
+                        {discount.discountType === "percentage" ? "%" : "$"}
+                      </span>
+                    </div>
+                    {errors[`discount_${index}_value`] && (
+                      <p
+                        style={{
+                          margin: "4px 0 0",
+                          fontSize: 12,
+                          color: "#dc2626",
+                        }}
+                      >
+                        {errors[`discount_${index}_value`]}
+                      </p>
+                    )}
+                  </div>
                 </div>
 
-                <div>
-                  <label style={labelStyle(errors[`discount_${index}_value`])}>
-                    {discount.discountType === "percentage" ? "Discount (%)" : "Discount Amount ($)"}{" "}
-                    <span style={{ color: "#c0392b" }}>*</span>
-                  </label>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    {discount.discountType === "fixed_amount" && <span style={{ fontSize: 15, color: "#555" }}>$</span>}
+                {/* Row 2: Min products + Code */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 16,
+                  }}
+                >
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "#111827",
+                        marginBottom: 6,
+                      }}
+                    >
+                      Minimum products required
+                    </label>
                     <input
                       type="number"
-                      value={discount.discountValue}
-                      min={0}
-                      max={discount.discountType === "percentage" ? 100 : undefined}
-                      step="0.01"
-                      onChange={(e) => updateDiscount(index, "discountValue", e.target.value)}
-                      style={{ padding: "8px 12px", fontSize: 14, border: `1px solid ${errors[`discount_${index}_value`] ? "#c0392b" : "#ccc"}`, borderRadius: 6, width: 130 }}
+                      value={discount.minProducts}
+                      min={2}
+                      max={100}
+                      onChange={(e) =>
+                        updateDiscount(index, "minProducts", e.target.value)
+                      }
+                      style={{
+                        width: "100%",
+                        padding: "10px 14px",
+                        fontSize: 13,
+                        border: "1px solid #e5e7eb",
+                        borderRadius: 8,
+                        backgroundColor: "#ffffff",
+                        color: "#111827",
+                        outline: "none",
+                        boxSizing: "border-box",
+                      }}
                     />
-                    {discount.discountType === "percentage" && <span style={{ fontSize: 15, color: "#555" }}>%</span>}
+                    <p
+                      style={{
+                        margin: "4px 0 0",
+                        fontSize: 11,
+                        color: "#6b7280",
+                      }}
+                    >
+                      Min. products from this bundle that must be in the cart
+                    </p>
                   </div>
-                  {errMsg(errors[`discount_${index}_value`])}
-                </div>
 
-                <div>
-                  <label style={labelStyle(false)}>Minimum Products Required</label>
-                  <input
-                    type="number"
-                    value={discount.minProducts}
-                    min={2}
-                    max={100}
-                    onChange={(e) => updateDiscount(index, "minProducts", e.target.value)}
-                    style={{ padding: "8px 12px", fontSize: 14, border: "1px solid #ccc", borderRadius: 6, width: 90 }}
-                  />
-                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "#888" }}>Min. bundle products required in cart</p>
-                </div>
-
-                <div>
-                  <label style={labelStyle(false)}>
-                    Discount Code{" "}
-                    <span style={{ fontWeight: 400, color: "#888", fontSize: 12 }}>(optional — auto-generated if blank)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={discount.discountCode}
-                    onChange={(e) => updateDiscount(index, "discountCode", e.target.value.toUpperCase())}
-                    placeholder="e.g. SUMMER20"
-                    style={{ ...fieldStyle(false), fontFamily: "monospace", letterSpacing: "0.05em" }}
-                  />
-                </div>
-
-                <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-                  <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 14, cursor: "pointer", userSelect: "none" }}>
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "#111827",
+                        marginBottom: 6,
+                      }}
+                    >
+                      Discount code{" "}
+                      <span style={{ fontWeight: 400, color: "#6b7280" }}>
+                        (optional)
+                      </span>
+                    </label>
                     <input
-                      type="checkbox"
-                      checked={discount.oneTimeUse}
-                      onChange={(e) => updateDiscount(index, "oneTimeUse", e.target.checked)}
-                      style={{ width: 16, height: 16, marginTop: 2, cursor: "pointer", accentColor: "#1a1a1a" }}
+                      type="text"
+                      value={discount.discountCode}
+                      onChange={(e) =>
+                        updateDiscount(
+                          index,
+                          "discountCode",
+                          e.target.value.toUpperCase(),
+                        )
+                      }
+                      placeholder="e.g. SUMMER20"
+                      style={{
+                        width: "100%",
+                        padding: "10px 14px",
+                        fontSize: 13,
+                        border: "1px solid #e5e7eb",
+                        borderRadius: 8,
+                        backgroundColor: "#ffffff",
+                        color: "#111827",
+                        outline: "none",
+                        boxSizing: "border-box",
+                        fontFamily: "monospace",
+                      }}
                     />
-                    <span>
-                      <strong>One-time use per customer</strong>
-                      <br />
-                      <span style={{ fontSize: 12, color: "#888" }}>Each customer can only redeem this once</span>
-                    </span>
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, cursor: "pointer", userSelect: "none" }}>
-                    <input
-                      type="checkbox"
-                      checked={discount.isActive}
-                      onChange={(e) => updateDiscount(index, "isActive", e.target.checked)}
-                      style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#1a1a1a" }}
-                    />
-                    <strong>Active</strong>
-                  </label>
+                    <p
+                      style={{
+                        margin: "4px 0 0",
+                        fontSize: 11,
+                        color: "#6b7280",
+                      }}
+                    >
+                      Auto-generated if left blank
+                    </p>
+                  </div>
+                </div>
+
+                {/* Toggles */}
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                    borderTop: "1px solid #e5e7eb",
+                    paddingTop: 14,
+                  }}
+                >
+                  {/* One time use toggle */}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: "#111827",
+                        }}
+                      >
+                        One-time use per customer
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#6b7280",
+                          marginTop: 2,
+                        }}
+                      >
+                        Each customer can only redeem this once
+                      </div>
+                    </div>
+                    <div
+                      onClick={() =>
+                        updateDiscount(
+                          index,
+                          "oneTimeUse",
+                          !discount.oneTimeUse,
+                        )
+                      }
+                      style={{
+                        width: 44,
+                        height: 24,
+                        borderRadius: 12,
+                        backgroundColor: discount.oneTimeUse
+                          ? "#059669"
+                          : "#e5e7eb",
+                        position: "relative",
+                        cursor: "pointer",
+                        transition: "background-color 0.2s ease",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: "50%",
+                          backgroundColor: "#ffffff",
+                          position: "absolute",
+                          top: 2,
+                          left: discount.oneTimeUse ? 22 : 2,
+                          transition: "left 0.2s ease",
+                          boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Active toggle */}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: "#111827",
+                        }}
+                      >
+                        Active
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#6b7280",
+                          marginTop: 2,
+                        }}
+                      >
+                        Turn off to pause this discount
+                      </div>
+                    </div>
+                    <div
+                      onClick={() =>
+                        updateDiscount(index, "isActive", !discount.isActive)
+                      }
+                      style={{
+                        width: 44,
+                        height: 24,
+                        borderRadius: 12,
+                        backgroundColor: discount.isActive
+                          ? "#059669"
+                          : "#e5e7eb",
+                        position: "relative",
+                        cursor: "pointer",
+                        transition: "background-color 0.2s ease",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: "50%",
+                          backgroundColor: "#ffffff",
+                          position: "absolute",
+                          top: 2,
+                          left: discount.isActive ? 22 : 2,
+                          transition: "left 0.2s ease",
+                          boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             ))}
-
-            <div>
-              <button
-                type="button"
-                onClick={addDiscount}
-                style={{ padding: "8px 16px", fontSize: 14, background: "#fff", color: "#1a1a1a", border: "1px solid #ccc", borderRadius: 6, cursor: "pointer", fontWeight: 500 }}
-              >
-                + Add Another Discount Tier
-              </button>
-            </div>
           </div>
-        </s-section>
 
-        {/* ── Action Buttons ─── */}
-        <div style={{ display: "flex", gap: 12, padding: "12px 0 20px", alignItems: "center" }}>
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            style={{
-              padding: "10px 28px", fontSize: 15, fontWeight: 700,
-              background: isSubmitting ? "#666" : "#1a1a1a",
-              color: "#fff", border: "none", borderRadius: 7,
-              cursor: isSubmitting ? "not-allowed" : "pointer",
-              opacity: isSubmitting ? 0.75 : 1, minWidth: 140,
-            }}
-          >
-            {isSubmitting ? "Saving…" : "Save Bundle"}
-          </button>
+          {/* Add Another Tier Button (Dashed) */}
           <button
             type="button"
-            onClick={() => navigate("/app/bundles")}
-            disabled={isSubmitting}
-            style={{ padding: "10px 20px", fontSize: 15, fontWeight: 500, background: "#fff", color: "#444", border: "1px solid #ccc", borderRadius: 7, cursor: "pointer" }}
+            onClick={addDiscount}
+            style={{
+              width: "100%",
+              padding: "12px",
+              border: "1px dashed #6ee7b7",
+              borderRadius: 10,
+              backgroundColor: "#ffffff",
+              color: "#059669",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              textAlign: "center",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              transition: "all 0.15s ease",
+            }}
           >
-            Cancel
+            <span style={{ fontSize: 15, fontWeight: 700 }}>+</span>
+            <span>Add another discount tier</span>
           </button>
-          {isSubmitting && <span style={{ fontSize: 13, color: "#888" }}>Saving your bundle…</span>}
         </div>
       </form>
-    </s-page>
+    </div>
   );
 }
 

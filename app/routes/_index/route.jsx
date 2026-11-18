@@ -1,5 +1,6 @@
-import { redirect, Form, useLoaderData } from "react-router";
-import { login } from "../../shopify.server";
+import { useEffect } from "react";
+import { redirect, Form, useLoaderData, useNavigate } from "react-router";
+import { login, authenticate } from "../../shopify.server";
 import styles from "./styles.module.css";
 
 export const loader = async ({ request }) => {
@@ -9,11 +10,39 @@ export const loader = async ({ request }) => {
     throw redirect(`/app?${url.searchParams.toString()}`);
   }
 
+  // Redirect if inside Shopify Admin context
+  if (
+    url.searchParams.get("host") ||
+    url.searchParams.get("embedded") ||
+    url.searchParams.get("id_token")
+  ) {
+    throw redirect(`/app?${url.searchParams.toString()}`);
+  }
+
+  // Attempt admin authentication if session exists
+  try {
+    const { session } = await authenticate.admin(request);
+    if (session?.shop) {
+      const search = url.searchParams.toString();
+      throw redirect(`/app${search ? `?${search}` : `?shop=${session.shop}`}`);
+    }
+  } catch (err) {
+    if (err instanceof Response) throw err;
+  }
+
   return { showForm: Boolean(login) };
 };
 
 export default function App() {
   const { showForm } = useLoaderData();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    // If embedded inside Shopify Admin iframe, redirect to /app
+    if (typeof window !== "undefined" && window.top !== window.self) {
+      navigate("/app" + window.location.search);
+    }
+  }, [navigate]);
 
   return (
     <div className={styles.index}>

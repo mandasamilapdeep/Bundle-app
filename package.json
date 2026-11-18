@@ -1,5 +1,5 @@
 {
-  "name": "bundle-first-app",
+  "name": "ms-bundle-discount",
   "private": true,
   "scripts": {
     "build": "react-router build",
