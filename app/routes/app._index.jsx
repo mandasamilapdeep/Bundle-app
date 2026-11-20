@@ -1,11 +1,4 @@
-import { useState } from "react";
-import {
-  useLoaderData,
-  useActionData,
-  Form,
-  useNavigation,
-  Link,
-} from "react-router";
+import { useLoaderData, Link } from "react-router";
 import { authenticate } from "../shopify.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
@@ -147,13 +140,7 @@ export const action = async ({ request }) => {
 };
 
 export default function AppIndex() {
-  const { bundleCount, activeCount, usageCount, appUrl } = useLoaderData();
-  const actionData = useActionData();
-  const navigation = useNavigation();
-  const isSaving = navigation.state === "submitting";
-
-  const [url, setUrl] = useState(appUrl || "");
-  const [showCustomUrl, setShowCustomUrl] = useState(false);
+  const { bundleCount, activeCount, usageCount } = useLoaderData();
 
   return (
     <div
@@ -166,40 +153,6 @@ export default function AppIndex() {
         color: "#1f2937",
       }}
     >
-      {actionData?.success && (
-        <div
-          style={{
-            marginBottom: 20,
-            padding: "12px 18px",
-            background: "#ecfdf5",
-            border: "1px solid #a7f3d0",
-            borderRadius: 12,
-            color: "#065f46",
-            fontSize: 14,
-            fontWeight: 600,
-          }}
-        >
-          ✓ App URL saved successfully! Storefront extension is connected.
-        </div>
-      )}
-
-      {actionData?.errors?.appUrl && (
-        <div
-          style={{
-            marginBottom: 20,
-            padding: "12px 18px",
-            background: "#fef2f2",
-            border: "1px solid #fecaca",
-            borderRadius: 12,
-            color: "#991b1b",
-            fontSize: 14,
-            fontWeight: 600,
-          }}
-        >
-          ⚠ {actionData.errors.appUrl}
-        </div>
-      )}
-
       {/* ─── Hero Banner ───────────────────────────────────────────────────────── */}
       <div
         style={{
@@ -713,275 +666,135 @@ export default function AppIndex() {
         </div>
       </div>
 
-      {/* ─── Bottom 2-Column Grid: Quick Actions & Theme Extension ────────────── */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1.35fr",
-          gap: 20,
-          marginTop: 28,
-        }}
-      >
-        {/* Left Column: Quick actions */}
-        <div>
-          <h2
-            style={{
-              fontSize: 18,
-              fontWeight: 800,
-              color: "#111827",
-              margin: "0 0 16px 0",
-            }}
-          >
-            Quick actions
-          </h2>
+      {/* ─── Quick Actions ─────────────────────────────────────────────────── */}
+      <div style={{ marginTop: 28 }}>
+        <h2
+          style={{
+            fontSize: 18,
+            fontWeight: 800,
+            color: "#111827",
+            margin: "0 0 16px 0",
+          }}
+        >
+          Quick actions
+        </h2>
 
-          <div
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+            gap: 16,
+          }}
+        >
+          {/* Manage bundles item */}
+          <Link
+            to="/app/bundles"
             style={{
-              backgroundColor: "#ffffff",
-              borderRadius: 16,
-              border: "1px solid #e5e7eb",
-              padding: 20,
-              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
               display: "flex",
-              flexDirection: "column",
-              gap: 12,
-            }}
-          >
-            {/* Manage bundles item */}
-            <Link
-              to="/app/bundles"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                padding: "14px 16px",
-                border: "1px solid #e5e7eb",
-                borderRadius: 12,
-                textDecoration: "none",
-                transition: "background-color 0.15s, border-color 0.15s",
-                backgroundColor: "#ffffff",
-              }}
-            >
-              <div
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 10,
-                  backgroundColor: "#059669",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="7" height="7"></rect>
-                  <rect x="14" y="3" width="7" height="7"></rect>
-                  <rect x="14" y="14" width="7" height="7"></rect>
-                  <rect x="3" y="14" width="7" height="7"></rect>
-                </svg>
-              </div>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>
-                  Manage bundles
-                </div>
-                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
-                  Edit, pause or delete
-                </div>
-              </div>
-            </Link>
-
-            {/* Create new bundle item */}
-            <Link
-              to="/app/bundles/new"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                padding: "14px 16px",
-                border: "1px solid #e5e7eb",
-                borderRadius: 12,
-                textDecoration: "none",
-                transition: "background-color 0.15s, border-color 0.15s",
-                backgroundColor: "#ffffff",
-              }}
-            >
-              <div
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 10,
-                  backgroundColor: "#f87171",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-              </div>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>
-                  Create new bundle
-                </div>
-                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
-                  Takes about a minute
-                </div>
-              </div>
-            </Link>
-          </div>
-        </div>
-
-        {/* Right Column: Storefront theme extension */}
-        <div>
-          <h2
-            style={{
-              fontSize: 18,
-              fontWeight: 800,
-              color: "#111827",
-              margin: "0 0 16px 0",
-            }}
-          >
-            Storefront theme extension
-          </h2>
-
-          <div
-            style={{
-              backgroundColor: "#ffffff",
-              borderRadius: 16,
+              alignItems: "center",
+              gap: 14,
+              padding: "18px 20px",
               border: "1px solid #e5e7eb",
-              padding: 22,
+              borderRadius: 16,
+              textDecoration: "none",
+              backgroundColor: "#ffffff",
               boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+              transition: "transform 0.15s, box-shadow 0.15s",
             }}
           >
-            {/* Status */}
             <div
               style={{
+                width: 44,
+                height: 44,
+                borderRadius: 12,
+                backgroundColor: "#059669",
                 display: "flex",
                 alignItems: "center",
-                gap: 8,
-                fontSize: 14,
-                fontWeight: 700,
-                color: "#059669",
+                justifyContent: "center",
+                flexShrink: 0,
               }}
             >
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 18,
-                  height: 18,
-                  borderRadius: "50%",
-                  backgroundColor: "#059669",
-                  color: "#ffffff",
-                  fontSize: 11,
-                  fontWeight: 900,
-                }}
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#ffffff"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
-                ✓
-              </span>
-              Connected in custom app mode
+                <rect x="3" y="3" width="7" height="7"></rect>
+                <rect x="14" y="3" width="7" height="7"></rect>
+                <rect x="14" y="14" width="7" height="7"></rect>
+                <rect x="3" y="14" width="7" height="7"></rect>
+              </svg>
             </div>
+            <div>
+              <div
+                style={{ fontSize: 15, fontWeight: 700, color: "#111827" }}
+              >
+                Manage bundles
+              </div>
+              <div style={{ fontSize: 13, color: "#6b7280", marginTop: 2 }}>
+                Edit, pause or delete
+              </div>
+            </div>
+          </Link>
 
-            {/* App URL code box */}
+          {/* Create new bundle item */}
+          <Link
+            to="/app/bundles/new"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
+              padding: "18px 20px",
+              border: "1px solid #e5e7eb",
+              borderRadius: 16,
+              textDecoration: "none",
+              backgroundColor: "#ffffff",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+              transition: "transform 0.15s, box-shadow 0.15s",
+            }}
+          >
             <div
               style={{
-                marginTop: 12,
-                marginBottom: 10,
-                padding: "9px 12px",
-                backgroundColor: "#f3f4f6",
-                border: "1px solid #e5e7eb",
-                borderRadius: 8,
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                fontSize: 13,
-                color: "#374151",
-                wordBreak: "break-all",
+                width: 44,
+                height: 44,
+                borderRadius: 12,
+                backgroundColor: "#f87171",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
               }}
             >
-              {appUrl || "https://your-tunnel.trycloudflare.com"}
-            </div>
-
-            <p
-              style={{
-                fontSize: 13,
-                color: "#6b7280",
-                lineHeight: 1.5,
-                margin: "0 0 16px 0",
-              }}
-            >
-              Your app URL syncs automatically from your local development tunnel, so you don't need third-party hosting while developing. Use it only when deploying to production.
-            </p>
-
-            {/* Collapsible Manual URL setting */}
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowCustomUrl(!showCustomUrl)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  padding: 0,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "#059669",
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 5,
-                }}
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#ffffff"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
-                <span style={{ fontSize: 10 }}>{showCustomUrl ? "▼" : "▶"}</span>
-                Set a custom app URL (optional)
-              </button>
-
-              {showCustomUrl && (
-                <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid #f3f4f6" }}>
-                  <Form method="post">
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                      <input
-                        type="text"
-                        name="appUrl"
-                        value={url}
-                        onChange={(e) => setUrl(e.target.value)}
-                        placeholder="https://your-tunnel.trycloudflare.com"
-                        style={{
-                          width: "100%",
-                          padding: "8px 12px",
-                          fontSize: 13,
-                          borderRadius: 6,
-                          border: "1px solid #d1d5db",
-                          fontFamily: "monospace",
-                          boxSizing: "border-box",
-                        }}
-                      />
-                      <button
-                        type="submit"
-                        disabled={isSaving}
-                        style={{
-                          alignSelf: "flex-start",
-                          padding: "8px 16px",
-                          fontSize: 13,
-                          fontWeight: 600,
-                          backgroundColor: "#059669",
-                          color: "#ffffff",
-                          border: "none",
-                          borderRadius: 6,
-                          cursor: isSaving ? "not-allowed" : "pointer",
-                          opacity: isSaving ? 0.7 : 1,
-                        }}
-                      >
-                        {isSaving ? "Saving…" : "Save App URL"}
-                      </button>
-                    </div>
-                  </Form>
-                </div>
-              )}
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
             </div>
-          </div>
+            <div>
+              <div
+                style={{ fontSize: 15, fontWeight: 700, color: "#111827" }}
+              >
+                Create new bundle
+              </div>
+              <div style={{ fontSize: 13, color: "#6b7280", marginTop: 2 }}>
+                Takes about a minute
+              </div>
+            </div>
+          </Link>
         </div>
       </div>
     </div>
