@@ -22,6 +22,13 @@
   }
 {%- endstyle -%}
 
+{% comment %} Ensure jQuery is loaded if the theme does not already provide it {% endcomment %}
+<script>
+  if (typeof window.jQuery === 'undefined' && !document.querySelector('script[src*="jquery"]')) {
+    document.write('<script src="https://code.jquery.com/jquery-3.7.1.min.js"><\/script>');
+  }
+</script>
+
 <div
   id="bundle-widget-{{ block.id }}"
   class="bundle-widget"
@@ -29,6 +36,7 @@
   data-block-id="{{ block.id }}"
   data-shop="{{ shop_domain }}"
   data-app-url="{{ app_url }}"
+  data-bundle-id="{{ block.settings.bundle_id | strip | escape }}"
   data-show-heading="{{ block.settings.show_heading }}"
   data-heading="{{ block.settings.heading | escape }}"
   data-subheading="{{ block.settings.subheading | escape }}"
@@ -60,14 +68,19 @@
   "settings": [
     {
       "type": "header",
-      "content": "App Connection"
+      "content": "Bundle Setup"
+    },
+    {
+      "type": "text",
+      "id": "bundle_id",
+      "label": "Bundle ID",
+      "info": "Paste the Bundle ID from your app to display only that bundle. (Find it under Manage bundles in the app)."
     },
     {
       "type": "text",
       "id": "app_url",
       "label": "App URL (fallback)",
-      "info": "Your app URL from shopify app dev. Set it once in the app dashboard under 'App URL' — it is auto-read from there.",
-      "placeholder": "https://xxxx.trycloudflare.com"
+      "info": "Your app URL from shopify app dev. Set it once in the app dashboard under 'App URL' — it is auto-read from there."
     },
     {
       "type": "header",
@@ -93,7 +106,7 @@
     },
     {
       "type": "header",
-      "content": "Layout"
+      "content": "Layout & Display"
     },
     {
       "type": "range",
@@ -103,10 +116,6 @@
       "max": 5,
       "step": 1,
       "default": 3
-    },
-    {
-      "type": "header",
-      "content": "Display Options"
     },
     {
       "type": "checkbox",
@@ -180,4 +189,3 @@
   ]
 }
 {% endschema %}
-

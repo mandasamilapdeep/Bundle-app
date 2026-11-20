@@ -48,6 +48,7 @@ export default function BundlesIndex() {
 
   const [filter, setFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [copiedId, setCopiedId] = useState(null);
 
   const activeCount = useMemo(
     () => bundles.filter((b) => b.status === "active").length,
@@ -424,10 +425,86 @@ export default function BundlesIndex() {
                       {bundle.title}
                     </div>
                     <div
-                      style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}
+                      style={{
+                        fontSize: 12,
+                        color: "#6b7280",
+                        marginTop: 2,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        flexWrap: "wrap",
+                      }}
                     >
-                      {bundle.products.length} product
-                      {bundle.products.length !== 1 ? "s" : ""}
+                      <span>
+                        {bundle.products.length} product
+                        {bundle.products.length !== 1 ? "s" : ""}
+                      </span>
+                      <span style={{ color: "#d1d5db" }}>•</span>
+                      <div
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 5,
+                          backgroundColor: "#f3f4f6",
+                          border: "1px solid #e5e7eb",
+                          borderRadius: 5,
+                          padding: "1px 7px",
+                          fontSize: 11,
+                          fontFamily: "monospace",
+                          color: "#4b5563",
+                        }}
+                      >
+                        <span>ID: {bundle.id}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (navigator?.clipboard) {
+                              navigator.clipboard.writeText(bundle.id);
+                            }
+                            setCopiedId(bundle.id);
+                            setTimeout(() => setCopiedId(null), 2000);
+                          }}
+                          title="Click to copy Bundle ID"
+                          style={{
+                            background: "none",
+                            border: "none",
+                            padding: "0 2px",
+                            cursor: "pointer",
+                            color: copiedId === bundle.id ? "#059669" : "#6b7280",
+                            fontWeight: 700,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            fontSize: 11,
+                          }}
+                        >
+                          {copiedId === bundle.id ? (
+                            <span style={{ color: "#059669", fontWeight: 700 }}>
+                              ✓ Copied
+                            </span>
+                          ) : (
+                            <svg
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <rect
+                                x="9"
+                                y="9"
+                                width="13"
+                                height="13"
+                                rx="2"
+                                ry="2"
+                              ></rect>
+                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -751,8 +828,7 @@ export default function BundlesIndex() {
                     marginTop: 2,
                   }}
                 >
-                  Add the bundle snippet to your theme to display bundles on
-                  your storefront.
+                  Add the "Bundle Deals" app block in your theme editor. Paste any Bundle ID into the block settings to show only that specific bundle!
                 </div>
               </div>
             </div>

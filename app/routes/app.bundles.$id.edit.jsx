@@ -223,6 +223,7 @@ export default function EditBundle() {
   );
   const [errors, setErrors] = useState({});
   const [savedBanner, setSavedBanner] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (actionData?.success) {
@@ -515,48 +516,94 @@ export default function EditBundle() {
           <div
             style={{
               display: "flex",
-              gap: 12,
+              justifyContent: "space-between",
               alignItems: "flex-start",
               marginBottom: 20,
+              gap: 12,
+              flexWrap: "wrap",
             }}
           >
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+              <div
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: 6,
+                  backgroundColor: "#d1fae5",
+                  color: "#059669",
+                  fontWeight: 800,
+                  fontSize: 13,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                1
+              </div>
+              <div>
+                <h2
+                  style={{
+                    fontSize: 15,
+                    fontWeight: 700,
+                    color: "#111827",
+                    margin: 0,
+                  }}
+                >
+                  Bundle details
+                </h2>
+                <p
+                  style={{
+                    fontSize: 12,
+                    color: "#6b7280",
+                    margin: "2px 0 0 0",
+                  }}
+                >
+                  Name your bundle and choose whether it's live.
+                </p>
+              </div>
+            </div>
+
+            {/* Bundle ID Copy Badge */}
             <div
               style={{
-                width: 26,
-                height: 26,
-                borderRadius: 6,
-                backgroundColor: "#d1fae5",
-                color: "#059669",
-                fontWeight: 800,
-                fontSize: 13,
-                display: "flex",
+                display: "inline-flex",
                 alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
+                gap: 8,
+                backgroundColor: "#f3f4f6",
+                border: "1px solid #e5e7eb",
+                borderRadius: 8,
+                padding: "5px 10px",
+                fontSize: 12,
               }}
             >
-              1
-            </div>
-            <div>
-              <h2
+              <span style={{ color: "#6b7280", fontWeight: 600 }}>Bundle ID:</span>
+              <code style={{ fontFamily: "monospace", color: "#111827", fontWeight: 700 }}>
+                {bundle.id}
+              </code>
+              <button
+                type="button"
+                onClick={() => {
+                  if (navigator?.clipboard) {
+                    navigator.clipboard.writeText(bundle.id);
+                  }
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
                 style={{
-                  fontSize: 15,
+                  backgroundColor: copied ? "#059669" : "#ffffff",
+                  color: copied ? "#ffffff" : "#374151",
+                  border: "1px solid #d1d5db",
+                  borderRadius: 5,
+                  padding: "2px 8px",
+                  fontSize: 11,
                   fontWeight: 700,
-                  color: "#111827",
-                  margin: 0,
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
                 }}
               >
-                Bundle details
-              </h2>
-              <p
-                style={{
-                  fontSize: 12,
-                  color: "#6b7280",
-                  margin: "2px 0 0 0",
-                }}
-              >
-                Name your bundle and choose whether it's live.
-              </p>
+                {copied ? "✓ Copied!" : "Copy ID"}
+              </button>
             </div>
           </div>
 
