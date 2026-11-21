@@ -524,6 +524,26 @@ export default function BundlesIndex() {
                   >
                     {discountLabel}
                   </span>
+                  {activeDiscount?.endsAt && (
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color:
+                          new Date(activeDiscount.endsAt).getTime() <= Date.now()
+                            ? "#dc2626"
+                            : "#6b7280",
+                        marginTop: 4,
+                        fontWeight:
+                          new Date(activeDiscount.endsAt).getTime() <= Date.now()
+                            ? 600
+                            : 400,
+                      }}
+                    >
+                      {new Date(activeDiscount.endsAt).getTime() <= Date.now()
+                        ? "Expired"
+                        : `Expires ${new Date(activeDiscount.endsAt).toLocaleDateString()}`}
+                    </div>
+                  )}
                 </div>
 
                 {/* Status Column */}

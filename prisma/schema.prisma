@@ -71,7 +71,10 @@ model BundleDiscount {
   oneTimeUse     Boolean  @default(true)  // discount valid for one-time use per customer
   discountCode   String?  // optional custom code; auto-generated if null
   shopifyDiscountId String? // Shopify discount ID after creation
-  createdAt      DateTime @default(now())
+  endsAt            DateTime? // optional expiry date and time
+  expire24Hours     Boolean   @default(false) // automatically expire newly created Shopify discount after 24 hours
+  expireAfterHours  Int?      @default(24) // duration in hours
+  createdAt         DateTime  @default(now())
   updatedAt      DateTime @updatedAt
 
   bundle  Bundle        @relation(fields: [bundleId], references: [id], onDelete: Cascade)

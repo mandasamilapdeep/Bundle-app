@@ -481,13 +481,22 @@ export default function AppIndex() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "#ffffff",
-              fontSize: 20,
-              fontWeight: 800,
               flexShrink: 0,
             }}
           >
-            %
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#ffffff"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+              <polyline points="17 6 23 6 23 12"></polyline>
+            </svg>
           </div>
           <div>
             <div style={{ fontSize: 28, fontWeight: 800, color: "#111827", lineHeight: 1.1 }}>

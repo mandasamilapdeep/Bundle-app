@@ -27,11 +27,20 @@ export const loader = async ({ request }) => {
     ];
   }
 
+  const now = new Date();
   const bundles = await prisma.bundle.findMany({
     where: whereClause,
     include: {
       products: { orderBy: { position: "asc" } },
-      discounts: { where: { isActive: true } },
+      discounts: {
+        where: {
+          isActive: true,
+          OR: [
+            { endsAt: null },
+            { endsAt: { gt: now } },
+          ],
+        },
+      },
     },
     orderBy: { createdAt: "desc" },
   });

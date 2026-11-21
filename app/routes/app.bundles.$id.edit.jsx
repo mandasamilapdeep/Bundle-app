@@ -55,6 +55,18 @@ export const action = async ({ request, params }) => {
     if (isNaN(v) || v <= 0) errors[`discount_${i}_value`] = "Enter a value greater than 0";
     if (d.discountType === "percentage" && v > 100)
       errors[`discount_${i}_value`] = "Percentage cannot exceed 100%";
+    if (d.hasEndDate) {
+      if (!d.endDate) {
+        errors[`discount_${i}_endDate`] = "Please choose an expiration date";
+      } else {
+        const expiryTimestamp = new Date(`${d.endDate}T${d.endTime || "23:59"}:00`).getTime();
+        if (isNaN(expiryTimestamp)) {
+          errors[`discount_${i}_endDate`] = "Invalid expiration date or time";
+        } else if (expiryTimestamp <= Date.now()) {
+          errors[`discount_${i}_endDate`] = "Expiration date must be in the future";
+        }
+      }
+    }
   });
   if (Object.keys(errors).length > 0) return { errors };
 
@@ -92,18 +104,69 @@ export const action = async ({ request, params }) => {
       (discount.discountCode || "").trim() ||
       `BUNDLE-${params.id.slice(-6).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
 
+    let endsAt = discount.endsAt ? new Date(discount.endsAt) : null;
+    const expire24Hours =
+      discount.expire24Hours === true || discount.expire24Hours === "true";
+    const expireAfterHours = parseInt(discount.expireAfterHours, 10) || 24;
+
+    if (expire24Hours && !endsAt) {
+      endsAt = new Date(Date.now() + expireAfterHours * 60 * 60 * 1000);
+    }
+
     if (discount.id) {
-      await prisma.bundleDiscount.update({
-        where: { id: discount.id },
-        data: {
-          discountType: discount.discountType,
-          discountValue: parseFloat(discount.discountValue),
-          minProducts: parseInt(discount.minProducts) || 2,
-          isActive: discount.isActive !== false && discount.isActive !== "false",
-          oneTimeUse: discount.oneTimeUse === true || discount.oneTimeUse === "true",
-          discountCode: code,
-        },
-      });
+      if (discount.shopifyDiscountId) {
+        try {
+          const basicCodeDiscount = {
+            ...(endsAt ? { endsAt: endsAt.toISOString() } : { endsAt: null }),
+          };
+          await admin.graphql(
+            `#graphql
+            mutation discountCodeBasicUpdate($id: ID!, $basicCodeDiscount: DiscountCodeBasicInput!) {
+              discountCodeBasicUpdate(id: $id, basicCodeDiscount: $basicCodeDiscount) {
+                userErrors { field message }
+              }
+            }`,
+            {
+              variables: {
+                id: discount.shopifyDiscountId,
+                basicCodeDiscount,
+              },
+            },
+          );
+        } catch (e) {
+          console.error("Shopify discount update failed:", e);
+        }
+      }
+
+      const updateData = {
+        discountType: discount.discountType,
+        discountValue: parseFloat(discount.discountValue),
+        minProducts: parseInt(discount.minProducts) || 2,
+        isActive: discount.isActive !== false && discount.isActive !== "false",
+        oneTimeUse: discount.oneTimeUse === true || discount.oneTimeUse === "true",
+        discountCode: code,
+        endsAt,
+        expire24Hours,
+        expireAfterHours,
+      };
+
+      try {
+        await prisma.bundleDiscount.update({
+          where: { id: discount.id },
+          data: updateData,
+        });
+      } catch (err) {
+        if (String(err).includes("expire24Hours")) {
+          delete updateData.expire24Hours;
+          delete updateData.expireAfterHours;
+          await prisma.bundleDiscount.update({
+            where: { id: discount.id },
+            data: updateData,
+          });
+        } else {
+          throw err;
+        }
+      }
     } else {
       let shopifyDiscountId = null;
       try {
@@ -111,6 +174,7 @@ export const action = async ({ request, params }) => {
           title: `${title} - Bundle Discount`,
           code,
           startsAt: new Date().toISOString(),
+          ...(endsAt ? { endsAt: endsAt.toISOString() } : {}),
           customerGets: {
             value:
               discount.discountType === "percentage"
@@ -157,18 +221,35 @@ export const action = async ({ request, params }) => {
         console.error("Shopify discount creation failed:", e);
       }
 
-      await prisma.bundleDiscount.create({
-        data: {
-          bundleId: params.id,
-          discountType: discount.discountType,
-          discountValue: parseFloat(discount.discountValue),
-          minProducts: parseInt(discount.minProducts) || 2,
-          isActive: discount.isActive !== false && discount.isActive !== "false",
-          oneTimeUse: discount.oneTimeUse === true || discount.oneTimeUse === "true",
-          discountCode: code,
-          shopifyDiscountId,
-        },
-      });
+      const createData = {
+        bundleId: params.id,
+        discountType: discount.discountType,
+        discountValue: parseFloat(discount.discountValue),
+        minProducts: parseInt(discount.minProducts) || 2,
+        isActive: discount.isActive !== false && discount.isActive !== "false",
+        oneTimeUse: discount.oneTimeUse === true || discount.oneTimeUse === "true",
+        discountCode: code,
+        shopifyDiscountId,
+        endsAt,
+        expire24Hours,
+        expireAfterHours,
+      };
+
+      try {
+        await prisma.bundleDiscount.create({
+          data: createData,
+        });
+      } catch (err) {
+        if (String(err).includes("expire24Hours")) {
+          delete createData.expire24Hours;
+          delete createData.expireAfterHours;
+          await prisma.bundleDiscount.create({
+            data: createData,
+          });
+        } else {
+          throw err;
+        }
+      }
     }
   }
 
@@ -201,15 +282,36 @@ export default function EditBundle() {
   );
   const [discounts, setDiscounts] = useState(
     bundle.discounts.length > 0
-      ? bundle.discounts.map((d) => ({
-          id: d.id,
-          discountType: d.discountType,
-          discountValue: String(d.discountValue),
-          minProducts: String(d.minProducts),
-          isActive: d.isActive,
-          oneTimeUse: d.oneTimeUse,
-          discountCode: d.discountCode || "",
-        }))
+      ? bundle.discounts.map((d) => {
+          const endsAtDateObj = d.endsAt ? new Date(d.endsAt) : null;
+          let endDate = "";
+          let endTime = "23:59";
+          if (endsAtDateObj && !isNaN(endsAtDateObj.getTime())) {
+            const pad = (n) => String(n).padStart(2, "0");
+            const year = endsAtDateObj.getFullYear();
+            const month = pad(endsAtDateObj.getMonth() + 1);
+            const day = pad(endsAtDateObj.getDate());
+            const hours = pad(endsAtDateObj.getHours());
+            const minutes = pad(endsAtDateObj.getMinutes());
+            endDate = `${year}-${month}-${day}`;
+            endTime = `${hours}:${minutes}`;
+          }
+          return {
+            id: d.id,
+            shopifyDiscountId: d.shopifyDiscountId || null,
+            discountType: d.discountType,
+            discountValue: String(d.discountValue),
+            minProducts: String(d.minProducts),
+            isActive: d.isActive,
+            oneTimeUse: d.oneTimeUse,
+            discountCode: d.discountCode || "",
+            hasEndDate: Boolean(d.endsAt),
+            endDate,
+            endTime,
+            expire24Hours: Boolean(d.expire24Hours),
+            expireAfterHours: String(d.expireAfterHours || 24),
+          };
+        })
       : [
           {
             discountType: "percentage",
@@ -218,6 +320,11 @@ export default function EditBundle() {
             isActive: true,
             oneTimeUse: true,
             discountCode: "",
+            hasEndDate: false,
+            endDate: "",
+            endTime: "23:59",
+            expire24Hours: false,
+            expireAfterHours: "24",
           },
         ],
   );
@@ -245,6 +352,18 @@ export default function EditBundle() {
       if (isNaN(v) || v <= 0) errs[`discount_${i}_value`] = "Enter a value greater than 0";
       if (d.discountType === "percentage" && v > 100)
         errs[`discount_${i}_value`] = "Percentage cannot exceed 100%";
+      if (d.hasEndDate && !d.expire24Hours) {
+        if (!d.endDate) {
+          errs[`discount_${i}_endDate`] = "Please choose an expiration date";
+        } else {
+          const expiryTimestamp = new Date(`${d.endDate}T${d.endTime || "23:59"}:00`).getTime();
+          if (isNaN(expiryTimestamp)) {
+            errs[`discount_${i}_endDate`] = "Invalid expiration date or time";
+          } else if (expiryTimestamp <= Date.now()) {
+            errs[`discount_${i}_endDate`] = "Expiration date must be in the future";
+          }
+        }
+      }
     });
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -254,13 +373,29 @@ export default function EditBundle() {
     if (e) e.preventDefault();
     if (!validate()) return;
 
+    const formattedDiscounts = discounts.map((d) => {
+      let endsAt = null;
+      if (d.hasEndDate && !d.expire24Hours && d.endDate) {
+        const dt = new Date(`${d.endDate}T${d.endTime || "23:59"}:00`);
+        if (!isNaN(dt.getTime())) {
+          endsAt = dt.toISOString();
+        }
+      }
+      return {
+        ...d,
+        endsAt,
+        hasEndDate: Boolean(d.hasEndDate && !d.expire24Hours),
+        expire24Hours: Boolean(d.expire24Hours),
+      };
+    });
+
     const fd = new FormData();
     fd.set("intent", "update");
     fd.set("title", title);
     fd.set("description", description);
     fd.set("status", status);
     fd.set("products", JSON.stringify(products));
-    fd.set("discounts", JSON.stringify(discounts));
+    fd.set("discounts", JSON.stringify(formattedDiscounts));
     submit(fd, { method: "post" });
   };
 
@@ -308,13 +443,22 @@ export default function EditBundle() {
         isActive: true,
         oneTimeUse: true,
         discountCode: "",
+        hasEndDate: false,
+        endDate: "",
+        endTime: "23:59",
+        expire24Hours: false,
+        expireAfterHours: "24",
       },
     ]);
 
-  const updateDiscount = (index, field, value) =>
+  const updateDiscount = (index, fieldOrObj, value) =>
     setDiscounts((prev) => {
       const n = [...prev];
-      n[index] = { ...n[index], [field]: value };
+      if (typeof fieldOrObj === "object" && fieldOrObj !== null) {
+        n[index] = { ...n[index], ...fieldOrObj };
+      } else {
+        n[index] = { ...n[index], [fieldOrObj]: value };
+      }
       return n;
     });
 
@@ -1485,6 +1629,338 @@ export default function EditBundle() {
                       />
                     </div>
                   </div>
+
+                  {/* Expiration date & time toggle */}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: "#111827",
+                        }}
+                      >
+                        Set expiration date & time
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#6b7280",
+                          marginTop: 2,
+                        }}
+                      >
+                        Automatically end and disable this discount after a set date and time
+                      </div>
+                    </div>
+                    <div
+                      onClick={() => {
+                        const nextHasEndDate = !discount.hasEndDate;
+                        const updates = {
+                          hasEndDate: nextHasEndDate,
+                          ...(nextHasEndDate ? { expire24Hours: false } : {}),
+                        };
+                        if (nextHasEndDate && !discount.endDate) {
+                          const defaultDate = new Date();
+                          defaultDate.setDate(defaultDate.getDate() + 7);
+                          const pad = (n) => String(n).padStart(2, "0");
+                          const defaultDateStr = `${defaultDate.getFullYear()}-${pad(
+                            defaultDate.getMonth() + 1,
+                          )}-${pad(defaultDate.getDate())}`;
+                          updates.endDate = defaultDateStr;
+                          if (!discount.endTime) {
+                            updates.endTime = "23:59";
+                          }
+                        }
+                        updateDiscount(index, updates);
+                        if (!nextHasEndDate) {
+                          setErrors((prev) => {
+                            const nextErr = { ...prev };
+                            delete nextErr[`discount_${index}_endDate`];
+                            return nextErr;
+                          });
+                        }
+                      }}
+                      style={{
+                        width: 44,
+                        height: 24,
+                        borderRadius: 12,
+                        backgroundColor: discount.hasEndDate
+                          ? "#059669"
+                          : "#e5e7eb",
+                        position: "relative",
+                        cursor: "pointer",
+                        transition: "background-color 0.2s ease",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: "50%",
+                          backgroundColor: "#ffffff",
+                          position: "absolute",
+                          top: 2,
+                          left: discount.hasEndDate ? 22 : 2,
+                          transition: "left 0.2s ease",
+                          boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Date & Time inputs if hasEndDate is active */}
+                  {discount.hasEndDate && (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 16,
+                        padding: "14px 16px",
+                        backgroundColor: "#ffffff",
+                        border: "1px solid #e5e7eb",
+                        borderRadius: 8,
+                        marginTop: 2,
+                      }}
+                    >
+                      <div>
+                        <label
+                          style={{
+                            display: "block",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: "#111827",
+                            marginBottom: 6,
+                          }}
+                        >
+                          Expiration date <span style={{ color: "#dc2626" }}>*</span>
+                        </label>
+                        <input
+                          type="date"
+                          value={discount.endDate || ""}
+                          onChange={(e) =>
+                            updateDiscount(index, "endDate", e.target.value)
+                          }
+                          style={{
+                            width: "100%",
+                            padding: "10px 14px",
+                            fontSize: 13,
+                            border: `1px solid ${
+                              errors[`discount_${index}_endDate`]
+                                ? "#dc2626"
+                                : "#e5e7eb"
+                            }`,
+                            borderRadius: 8,
+                            backgroundColor: "#ffffff",
+                            color: "#111827",
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                        {errors[`discount_${index}_endDate`] && (
+                          <p
+                            style={{
+                              margin: "4px 0 0",
+                              fontSize: 12,
+                              color: "#dc2626",
+                            }}
+                          >
+                            {errors[`discount_${index}_endDate`]}
+                          </p>
+                        )}
+                      </div>
+
+                      <div>
+                        <label
+                          style={{
+                            display: "block",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: "#111827",
+                            marginBottom: 6,
+                          }}
+                        >
+                          Expiration time
+                        </label>
+                        <input
+                          type="time"
+                          value={discount.endTime || "23:59"}
+                          onChange={(e) =>
+                            updateDiscount(index, "endTime", e.target.value)
+                          }
+                          style={{
+                            width: "100%",
+                            padding: "10px 14px",
+                            fontSize: 13,
+                            border: "1px solid #e5e7eb",
+                            borderRadius: 8,
+                            backgroundColor: "#ffffff",
+                            color: "#111827",
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Expire after 24 hours toggle */}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: "#111827",
+                        }}
+                      >
+                        Expire newly created discount after 24 hours
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#6b7280",
+                          marginTop: 2,
+                        }}
+                      >
+                        Automatically set newly created Shopify discounts to expire 24 hours after creation
+                      </div>
+                    </div>
+                    <div
+                      onClick={() => {
+                        const nextExpire24Hours = !discount.expire24Hours;
+                        const updates = {
+                          expire24Hours: nextExpire24Hours,
+                          ...(nextExpire24Hours ? { hasEndDate: false } : {}),
+                        };
+                        updateDiscount(index, updates);
+                        if (nextExpire24Hours) {
+                          setErrors((prev) => {
+                            const nextErr = { ...prev };
+                            delete nextErr[`discount_${index}_endDate`];
+                            return nextErr;
+                          });
+                        }
+                      }}
+                      style={{
+                        width: 44,
+                        height: 24,
+                        borderRadius: 12,
+                        backgroundColor: discount.expire24Hours
+                          ? "#059669"
+                          : "#e5e7eb",
+                        position: "relative",
+                        cursor: "pointer",
+                        transition: "background-color 0.2s ease",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: "50%",
+                          backgroundColor: "#ffffff",
+                          position: "absolute",
+                          top: 2,
+                          left: discount.expire24Hours ? 22 : 2,
+                          transition: "left 0.2s ease",
+                          boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Duration input if expire24Hours is active */}
+                  {discount.expire24Hours && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "12px 16px",
+                        backgroundColor: "#ffffff",
+                        border: "1px solid #e5e7eb",
+                        borderRadius: 8,
+                        marginTop: 2,
+                      }}
+                    >
+                      <div>
+                        <label
+                          style={{
+                            display: "block",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: "#111827",
+                          }}
+                        >
+                          Expiration duration
+                        </label>
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: "#6b7280",
+                            marginTop: 2,
+                          }}
+                        >
+                          Discount codes will expire this many hours after generation
+                        </div>
+                      </div>
+                      <div style={{ width: 100, position: "relative" }}>
+                        <input
+                          type="number"
+                          min={1}
+                          max={720}
+                          value={discount.expireAfterHours || "24"}
+                          onChange={(e) =>
+                            updateDiscount(
+                              index,
+                              "expireAfterHours",
+                              e.target.value,
+                            )
+                          }
+                          style={{
+                            width: "100%",
+                            padding: "8px 36px 8px 12px",
+                            fontSize: 13,
+                            fontWeight: 600,
+                            border: "1px solid #e5e7eb",
+                            borderRadius: 8,
+                            backgroundColor: "#ffffff",
+                            color: "#111827",
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                        <span
+                          style={{
+                            position: "absolute",
+                            right: 12,
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                            color: "#6b7280",
+                            fontSize: 12,
+                            fontWeight: 500,
+                            pointerEvents: "none",
+                          }}
+                        >
+                          hrs
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

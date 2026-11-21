@@ -65,12 +65,19 @@ export const action = async ({ request }) => {
   }
 
   // Find the bundle and active discounts
+  const now = new Date();
   const bundle = await prisma.bundle.findFirst({
     where: { id: bundleId, shop },
     include: {
       products: true,
       discounts: {
-        where: { isActive: true },
+        where: {
+          isActive: true,
+          OR: [
+            { endsAt: null },
+            { endsAt: { gt: now } },
+          ],
+        },
         orderBy: { minProducts: "desc" },
       },
     },
@@ -153,22 +160,42 @@ export const action = async ({ request }) => {
   try {
     const { admin } = await unauthenticated.admin(shop);
 
-    const customerGetsValue = {
-      discountAmount: {
-        amount: calculatedSavings.toFixed(2),
-        appliesOnEachItem: false,
-      },
-    };
+    const customerGetsValue =
+      matchingTier.discountType === "percentage"
+        ? {
+            percentage: parseFloat(matchingTier.discountValue) / 100,
+          }
+        : {
+            discountAmount: {
+              amount: calculatedSavings.toFixed(2),
+              appliesOnEachItem: false,
+            },
+          };
 
     const itemsRestriction =
       bundleProductGids.length > 0
         ? { products: { productsToAdd: bundleProductGids } }
         : { all: true };
 
+    let effectiveEndsAt = null;
+    if (matchingTier.expire24Hours) {
+      const hours = parseInt(matchingTier.expireAfterHours, 10) || 24;
+      effectiveEndsAt = new Date(Date.now() + hours * 60 * 60 * 1000);
+    }
+    if (matchingTier.endsAt) {
+      const fixedEndsAt = new Date(matchingTier.endsAt);
+      if (!effectiveEndsAt || fixedEndsAt < effectiveEndsAt) {
+        effectiveEndsAt = fixedEndsAt;
+      }
+    }
+
     const basicCodeDiscount = {
       title: `${bundle.title} (${uniqueCode})`,
       code: uniqueCode,
       startsAt: new Date().toISOString(),
+      ...(effectiveEndsAt
+        ? { endsAt: effectiveEndsAt.toISOString() }
+        : {}),
       usageLimit: 1, // STRICTLY ONE-TIME USE PER UNIQUE PURCHASE
       appliesOncePerCustomer: true,
       customerGets: {
